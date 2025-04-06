@@ -6,13 +6,13 @@
 #include <sys/sem.h>
 #include "shm_com.h"
 
-// Função para "travar" o semáforo (diminuir valor)
+// Função para "fechar" o semáforo 
 void down(int semid, int sem_num) {
     struct sembuf op = {sem_num, -1, 0};
     semop(semid, &op, 1);
 }
 
-// Função para "destravar" o semáforo (aumentar valor)
+// Função para "abrir" o semáforo 
 void up(int semid, int sem_num) {
     struct sembuf op = {sem_num, 1, 0};
     semop(semid, &op, 1);
@@ -59,7 +59,7 @@ int main() {
         fgets(buffer, BUFSIZ, stdin);
         buffer[strcspn(buffer, "\n")] = '\0';  // Remove o enter
 
-        // Comando especial: status
+        // Comando status
         if (strcmp(buffer, "status") == 0) {
             printf("Status: %d/%d mensagens consumidas\n", 
                   dados->contador_mensagens, MAX_MENSAGENS);
@@ -71,7 +71,7 @@ int main() {
 
         // Escreve a mensagem na memória compartilhada
         strncpy(dados->texto, buffer, TAM_TEXTO);
-        dados->escrito_por_voce = 1;  // Avisa que tem mensagem nova
+        dados->escrito = 1;  // Avisa que tem mensagem nova
 
         // Sai da região crítica (destrava o mutex)
         up(id_sem, 0);
@@ -79,7 +79,7 @@ int main() {
         // Avisa que tem um novo item disponível
         up(id_sem, 1);
 
-        // Comando especial: fim
+        // Comando fim
         if (strcmp(buffer, "fim") == 0) {
             executando = 0;
             printf("Finalizando produtor...\n");

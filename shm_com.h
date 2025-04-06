@@ -20,7 +20,7 @@
 
 // Estrutura que será compartilhada entre os processos
 struct estrutura_compartilhada {
-    int escrito_por_voce;    // 1 = tem mensagem nova, 0 = mensagem já lida
+    int escrito;    // 1 = tem mensagem nova, 0 = mensagem já lida
     int contador_mensagens;  // Quantas mensagens já foram processadas
     char texto[TAM_TEXTO];   // Onde a mensagem é armazenada
 };

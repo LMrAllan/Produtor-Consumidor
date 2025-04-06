@@ -6,7 +6,7 @@
 #include <sys/sem.h>
 #include "shm_com.h"
 
-// Funções down e up (mesmas do produtor)
+// Funções down e up 
 void down(int semid, int sem_num) {
     struct sembuf op = {sem_num, -1, 0};
     semop(semid, &op, 1);
@@ -27,7 +27,7 @@ int main() {
     printf("Vai consumir até %d mensagens.\n", MAX_MENSAGENS);
     printf("Aguardando mensagens do produtor...\n\n");
 
-    // Acessa a memória compartilhada (mesma chave do produtor)
+    // Acessa a memória compartilhada
     id_shm = shmget(CHAVE_SHM, sizeof(struct estrutura_compartilhada), 0666 | IPC_CREAT);
     if (id_shm == -1) {
         perror("Erro ao acessar memória compartilhada");
@@ -38,7 +38,7 @@ int main() {
     memoria_compartilhada = shmat(id_shm, NULL, 0);
     dados = (struct estrutura_compartilhada *)memoria_compartilhada;
 
-    // Acessa os semáforos (mesma chave do produtor)
+    // Acessa os semáforos 
     id_sem = semget(CHAVE_SEM, 2, 0666 | IPC_CREAT);
     if (id_sem == -1) {
         perror("Erro ao acessar semáforos");
@@ -55,7 +55,7 @@ int main() {
 
         // Mostra a mensagem recebida
         printf("Mensagem recebida: %s\n", dados->texto);
-        dados->escrito_por_voce = 0;  // Marca como lida
+        dados->escrito = 0;  // Marca como lida
         dados->contador_mensagens++;  // Conta mais uma mensagem
 
         // Sai da região crítica (destrava o mutex)
@@ -79,9 +79,6 @@ int main() {
     // Se for o último consumidor, limpa os recursos
     if (dados->contador_mensagens >= MAX_MENSAGENS || 
         strcmp(dados->texto, "fim") == 0) {
-        shmctl(id_shm, IPC_RMID, NULL);  // Remove memória
-        semctl(id_sem, 0, IPC_RMID, NULL);  // Remove semáforos
-        printf("Recursos liberados.\n");
     }
 
     printf("Consumidor encerrado.\n");
