@@ -6,87 +6,112 @@
 #include <sys/sem.h>
 #include "shm_com.h"
 
-// Função para "fechar" o semáforo 
 void down(int semid, int sem_num) {
     struct sembuf op = {sem_num, -1, 0};
     semop(semid, &op, 1);
 }
 
-// Função para "abrir" o semáforo 
 void up(int semid, int sem_num) {
     struct sembuf op = {sem_num, 1, 0};
     semop(semid, &op, 1);
 }
 
 int main() {
-    int executando = 1;  // Controla o loop principal
-    void *memoria_compartilhada;  // Ponteiro para a memória compartilhada
-    struct estrutura_compartilhada *dados;  // Dados compartilhados
-    char buffer[BUFSIZ];  // Buffer para ler mensagens do teclado
-    int id_shm, id_sem;   // Identificadores da memória e semáforos
+    int executando = 1;
+    void *memoria_compartilhada;
+    struct estrutura_compartilhada *dados;
+    char buffer[BUFSIZ];
+    int id_shm, id_sem;
 
     printf("\n=== PRODUTOR ===\n");
     printf("Digite mensagens para o consumidor.\n");
-    printf("Comandos: 'fim' para terminar, 'status' para ver contagem\n\n");
+    printf("Comandos:\n");
+    printf("  'status' - Mostra quantas mensagens foram consumidas\n");
+    printf("  'fim'    - Encerra ambos os processos\n");
+    printf("  'limpar' - Encerra ambos e libera recursos\n\n");
 
-    // Cria ou acessa a memória compartilhada
     id_shm = shmget(CHAVE_SHM, sizeof(struct estrutura_compartilhada), IPC_CREAT | 0666);
     if (id_shm == -1) {
         perror("Erro ao acessar memória compartilhada");
         exit(1);
     }
 
-    // Conecta a memória compartilhada ao nosso programa
     memoria_compartilhada = shmat(id_shm, NULL, 0);
     dados = (struct estrutura_compartilhada *)memoria_compartilhada;
 
-    // Cria ou acessa os semáforos
     id_sem = semget(CHAVE_SEM, 2, IPC_CREAT | 0666);
     if (id_sem == -1) {
         perror("Erro ao acessar semáforos");
         exit(1);
     }
 
-    // Configura os semáforos iniciais se for a primeira execução
-    if (semctl(id_sem, 0, GETVAL) == 0) {
-        semctl(id_sem, 0, SETVAL, 1);  // Semáforo 0 começa em 1 (mutex)
-        semctl(id_sem, 1, SETVAL, 0);  // Semáforo 1 começa em 0 (itens)
+    // Inicialização dos semáforos
+    if (semctl(id_sem, 0, GETVAL) == 0) {  // Semáforo 0: controle de acesso
+        semctl(id_sem, 0, SETVAL, 1);
+    }
+    if (semctl(id_sem, 1, GETVAL) == 0) {  // Semáforo 1: itens no buffer
+        semctl(id_sem, 1, SETVAL, 0);
     }
 
-    // Loop principal
+    // Inicialização dos dados compartilhados
+    if (dados->contador_mensagens == 0) {
+        dados->indice_produtor = 0;
+        dados->indice_consumidor = 0;
+        dados->contador_mensagens = 0;
+        dados->mensagens_no_buffer = 0;
+    }
+
     while(executando) {
         printf("Digite uma mensagem: ");
         fgets(buffer, BUFSIZ, stdin);
-        buffer[strcspn(buffer, "\n")] = '\0';  // Remove o enter
+        buffer[strcspn(buffer, "\n")] = '\0';
 
-        // Comando status
         if (strcmp(buffer, "status") == 0) {
-            printf("Status: %d/%d mensagens consumidas\n", 
-                  dados->contador_mensagens, MAX_MENSAGENS);
+            printf("Status: %d/%d mensagens consumidas (Buffer: %d/%d)\n", 
+                  dados->contador_mensagens, MAX_MENSAGENS, 
+                  dados->mensagens_no_buffer, TAM_BUFFER);
             continue;
         }
 
-        // Entra na região crítica (trava o mutex)
-        down(id_sem, 0);
+        down(id_sem, 0);  // Bloqueia acesso ao buffer
 
-        // Escreve a mensagem na memória compartilhada
-        strncpy(dados->texto, buffer, TAM_TEXTO);
-        dados->escrito = 1;  // Avisa que tem mensagem nova
+        if (strcmp(buffer, "fim") == 0 || strcmp(buffer, "limpar") == 0) {
+            // Insere comando especial no buffer
+            strncpy(dados->buffer[dados->indice_produtor], 
+                   (strcmp(buffer, "fim") == 0) ? "\x01" : "\x02", TAM_TEXTO);
+            dados->indice_produtor = (dados->indice_produtor + 1) % TAM_BUFFER;
+            dados->mensagens_no_buffer++;
+            
+            up(id_sem, 0);  // Libera acesso ao buffer
+            up(id_sem, 1);  // Sinaliza que há novo item
 
-        // Sai da região crítica (destrava o mutex)
-        up(id_sem, 0);
-        
-        // Avisa que tem um novo item disponível
-        up(id_sem, 1);
+            if (strcmp(buffer, "limpar") == 0) {
+                shmdt(memoria_compartilhada);
+                shmctl(id_shm, IPC_RMID, NULL);
+                semctl(id_sem, 0, IPC_RMID);
+                printf("Recursos liberados.\n");
+            }
 
-        // Comando fim
-        if (strcmp(buffer, "fim") == 0) {
             executando = 0;
-            printf("Finalizando produtor...\n");
+            continue;
         }
+
+        if (dados->mensagens_no_buffer == TAM_BUFFER) {
+            printf("Buffer cheio! Aguarde o consumidor processar algumas mensagens.\n");
+            up(id_sem, 0);  // Libera acesso ao buffer antes de esperar
+            sleep(1);
+            continue;
+        }
+
+        // Insere mensagem no buffer
+        strncpy(dados->buffer[dados->indice_produtor], buffer, TAM_TEXTO);
+        dados->indice_produtor = (dados->indice_produtor + 1) % TAM_BUFFER;
+        dados->mensagens_no_buffer++;
+        
+        up(id_sem, 0);  // Libera acesso ao buffer
+        up(id_sem, 1);  // Sinaliza que há novo item
     }
 
-    // Desconecta da memória compartilhada
     shmdt(memoria_compartilhada);
     printf("Produtor encerrado.\n");
     return 0;
